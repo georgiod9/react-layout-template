@@ -1,0 +1,108 @@
+name: Build and Deploy to ICP
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to build from'
+        required: true
+        default: 'main'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+      
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          
+      - name: Find Package JSON
+        id: find-package-json
+        run: |
+          cd package.json
+          if [ ! -f "package.json" ]; then
+            echo "::error::No package.json found in specified path"
+            exit 1
+          fi
+          
+      - name: Detect Package Manager
+        id: detect-package-manager
+        working-directory: package.json
+        run: |
+          if [ -f "yarn.lock" ]; then
+            echo "manager=yarn" >> $GITHUB_OUTPUT
+            echo "command=install" >> $GITHUB_OUTPUT
+          elif [ -f "pnpm-lock.yaml" ]; then
+            echo "manager=pnpm" >> $GITHUB_OUTPUT
+            echo "command=install" >> $GITHUB_OUTPUT
+          else
+            echo "manager=npm" >> $GITHUB_OUTPUT
+            echo "command=ci" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Install Dependencies
+        working-directory: package.json
+        run: ${{ steps.detect-package-manager.outputs.manager }} ${{ steps.detect-package-manager.outputs.command }} --legacy-peer-deps
+        
+      - name: Build
+        working-directory: package.json
+        run: |
+          echo "Starting build process..."
+          echo "Current directory: $(pwd)"
+          echo "Checking package.json scripts:"
+          cat package.json | grep '"scripts"' -A 10
+          
+          # Remove prebuild script to skip dfx commands
+          npm pkg delete scripts.prebuild
+          
+          echo "Modified package.json scripts:"
+          cat package.json | grep '"scripts"' -A 10
+          
+          echo "Running build command..."
+          ${{ steps.detect-package-manager.outputs.manager }} run build --verbose
+          
+          echo "Build completed. Checking dist directory structure:"
+          tree dist || ls -R dist
+          
+          echo "Checking dist directory sizes:"
+          du -sh dist/*
+        
+      - name: Create and Check Zip
+        working-directory: package.json
+        run: |
+          echo "Creating zip file..."
+          echo "Current directory: $(pwd)"
+          
+          if [ ! -d "dist" ]; then
+            echo "Error: dist directory not found!"
+            exit 1
+          fi
+          
+          if [ -z "$(ls -A dist)" ]; then
+            echo "Error: dist directory is empty!"
+            exit 1
+          fi
+          
+          echo "Creating build directory..."
+          mkdir -p ../build
+          
+          echo "Zipping dist contents..."
+          cd dist
+          zip -r ../../build/build.zip .
+          
+          echo "Checking zip file..."
+          cd ../../build
+          ls -la
+          echo "Zip file contents:"
+          unzip -l build.zip
+          
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifact
+          path: package.json/dist
+          retention-days: 1

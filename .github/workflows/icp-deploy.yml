@@ -23,7 +23,9 @@ jobs:
       - name: Find Package JSON
         id: find-package-json
         run: |
-          cd .
+          
+          pwd
+          ls -la
           if [ ! -f "package.json" ]; then
             echo "::error::No package.json found in specified path"
             exit 1
@@ -104,5 +106,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-artifact
-          path: ./dist
+          path: dist
           retention-days: 1
